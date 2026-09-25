@@ -66,6 +66,12 @@ NOMES_MODALIDADE = {
 
 TZ_BR = timezone(timedelta(hours=-3))
 
+UFS_BRASIL = [
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
+    "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
+    "SP", "SE", "TO",
+]
+
 
 def consultar_modalidade(codigo_modalidade, data_final, uf=None):
     """Busca todas as paginas de uma modalidade na API de propostas abertas."""
@@ -259,6 +265,7 @@ def gerar_html(linhas, caminho="docs/index.html"):
         {v: k for k, v in NOMES_MODALIDADE.items()}, ensure_ascii=False
     )
     ufs_json = json.dumps(UFS_DESEJADAS, ensure_ascii=False)
+    todas_ufs_json = json.dumps(UFS_BRASIL, ensure_ascii=False)
     esferas_json = json.dumps(sorted(ESFERAS_DESEJADAS), ensure_ascii=False)
     palavras_json = json.dumps(PALAVRAS_CHAVE, ensure_ascii=False)
 
@@ -295,6 +302,15 @@ def gerar_html(linhas, caminho="docs/index.html"):
     background: var(--bg); color: var(--text); font-size: 0.85rem;
   }}
   .filtros .campo-data {{ display: flex; flex-direction: column; gap: 0.4rem; }}
+  .grade-uf {{
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.1rem 0.6rem;
+    max-height: 130px; overflow-y: auto; padding-right: 0.4rem; min-width: 220px;
+  }}
+  .grade-uf label {{ margin: 0.1rem 0; }}
+  .filtros input[type="text"] {{
+    padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 0.85rem; width: 220px;
+  }}
   .filtros button {{
     padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border);
     background: var(--bg); color: var(--text); cursor: pointer; font-size: 0.85rem; height: fit-content;
@@ -331,11 +347,20 @@ def gerar_html(linhas, caminho="docs/index.html"):
       <div id="filtroModalidade"></div>
     </fieldset>
     <fieldset>
+      <legend>Estado (UF)</legend>
+      <div id="filtroUf" class="grade-uf"></div>
+    </fieldset>
+    <fieldset>
       <legend>Encerramento da proposta</legend>
       <div class="campo-data">
         <label>De: <input type="date" id="dataDe"></label>
         <label>Até: <input type="date" id="dataAte"></label>
       </div>
+    </fieldset>
+    <fieldset>
+      <legend>Palavra-chave no objeto</legend>
+      <input type="text" id="buscaTexto" placeholder="ex: material de escritório, epi...">
+      <div class="meta" style="margin:0.3rem 0 0">Separe por vírgula para buscar mais de um termo</div>
     </fieldset>
     <button id="limparFiltros">Limpar filtros</button>
     <div class="acoes-topo">
@@ -362,6 +387,7 @@ def gerar_html(linhas, caminho="docs/index.html"):
   const NOME_MODALIDADE = {nome_modalidade_json};       // {{"6": "Pregão - Eletrônico", ...}}
   const CODIGO_MODALIDADE = {codigo_modalidade_json};   // {{"Pregão - Eletrônico": "6", ...}}
   const UFS = {ufs_json};
+  const TODAS_UFS = {todas_ufs_json};
   const ESFERAS = {esferas_json};
   const PALAVRAS = {palavras_json};
   const DIAS_A_FRENTE_PADRAO = {DIAS_A_FRENTE};
@@ -382,6 +408,22 @@ def gerar_html(linhas, caminho="docs/index.html"):
     filtroModalidadeEl.appendChild(label);
   }});
 
+  // Monta os checkboxes de UF (todas as 27 unidades federativas; as
+  // configuradas no robo vem pre-marcadas, as demais ficam disponiveis
+  // para quem quiser ampliar a busca ao vivo para outros estados)
+  const filtroUfEl = document.getElementById('filtroUf');
+  const ufsPadrao = UFS.length ? UFS : TODAS_UFS;
+  TODAS_UFS.forEach((uf, i) => {{
+    const id = 'uf_' + i;
+    const marcado = ufsPadrao.includes(uf);
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" class="chk-uf" value="${{uf}}" id="${{id}}" ${{marcado ? 'checked' : ''}}> ${{uf}}`;
+    filtroUfEl.appendChild(label);
+  }});
+
+  const buscaTextoEl = document.getElementById('buscaTexto');
+  buscaTextoEl.value = PALAVRAS.join(', ');
+
   const corpoTabela = document.getElementById('corpoTabela');
   const contador = document.getElementById('contador');
   const totalMostrado = document.getElementById('totalMostrado');
@@ -395,6 +437,12 @@ def gerar_html(linhas, caminho="docs/index.html"):
   function modalidadesSelecionadas() {{
     return Array.from(document.querySelectorAll('.chk-modalidade:checked')).map(c => c.value);
   }}
+  function ufsSelecionadas() {{
+    return Array.from(document.querySelectorAll('.chk-uf:checked')).map(c => c.value);
+  }}
+  function palavrasChave() {{
+    return buscaTextoEl.value.split(',').map(p => p.trim().toLowerCase()).filter(Boolean);
+  }}
 
   function linkParticipar(r) {{
     return r.link ? `<a href="${{escapeHtml(r.link)}}" target="_blank" rel="noopener">Participar ↗</a>` : '';
@@ -405,13 +453,17 @@ def gerar_html(linhas, caminho="docs/index.html"):
 
   function render() {{
     const mods = new Set(modalidadesSelecionadas());
+    const ufs = new Set(ufsSelecionadas());
+    const palavras = palavrasChave();
     const de = dataDeEl.value;   // "AAAA-MM-DD" ou ""
     const ate = dataAteEl.value;
 
     const filtrados = DADOS.filter(r => {{
       if (!mods.has(r.modalidade)) return false;
+      if (ufs.size && r.uf && !ufs.has(r.uf)) return false;
       if (de && r.encerramento_data && r.encerramento_data < de) return false;
       if (ate && r.encerramento_data && r.encerramento_data > ate) return false;
+      if (palavras.length && !palavras.some(p => r.objeto.toLowerCase().includes(p))) return false;
       return true;
     }});
 
@@ -433,10 +485,14 @@ def gerar_html(linhas, caminho="docs/index.html"):
   }}
 
   document.querySelectorAll('.chk-modalidade').forEach(c => c.addEventListener('change', render));
+  document.querySelectorAll('.chk-uf').forEach(c => c.addEventListener('change', render));
+  buscaTextoEl.addEventListener('input', render);
   dataDeEl.addEventListener('change', render);
   dataAteEl.addEventListener('change', render);
   document.getElementById('limparFiltros').addEventListener('click', () => {{
     document.querySelectorAll('.chk-modalidade').forEach(c => c.checked = true);
+    document.querySelectorAll('.chk-uf').forEach(c => c.checked = ufsPadrao.includes(c.value));
+    buscaTextoEl.value = '';
     dataDeEl.value = '';
     dataAteEl.value = '';
     render();
@@ -548,12 +604,21 @@ def gerar_html(linhas, caminho="docs/index.html"):
       statusEl.textContent = 'Selecione ao menos uma modalidade antes de buscar.';
       return;
     }}
+    const ufsMarcadas = ufsSelecionadas();
+    if (ufsMarcadas.length === 0) {{
+      statusEl.textContent = 'Selecione ao menos um estado (UF) antes de buscar.';
+      return;
+    }}
+    const palavras = palavrasChave();
     const ate = dataAteEl.value;
     const dataFinal = ate ? ate.replaceAll('-', '') : dataFinalPadrao();
-    const listaUfs = UFS.length ? UFS : [null];
+    const listaUfs = ufsMarcadas;
 
+    const combinacoes = codigos.length * listaUfs.length;
     botaoAoVivo.disabled = true;
-    statusEl.textContent = 'Iniciando busca ao vivo no PNCP...';
+    statusEl.textContent = combinacoes > 12
+      ? `Iniciando busca ao vivo (${{combinacoes}} combinações de modalidade/UF — pode demorar bastante)...`
+      : 'Iniciando busca ao vivo no PNCP...';
 
     try {{
       let todos = [];
@@ -565,8 +630,8 @@ def gerar_html(linhas, caminho="docs/index.html"):
       }}
 
       let filtrados = ESFERAS.length ? todos.filter(r => ESFERAS.includes(r.esferaRaw)) : todos;
-      if (PALAVRAS.length) {{
-        filtrados = filtrados.filter(r => PALAVRAS.some(p => r.objeto.toLowerCase().includes(p.toLowerCase())));
+      if (palavras.length) {{
+        filtrados = filtrados.filter(r => palavras.some(p => r.objeto.toLowerCase().includes(p)));
       }}
       filtrados.sort((a, b) => (a.encerramento_data || '').localeCompare(b.encerramento_data || ''));
 
