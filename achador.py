@@ -24,8 +24,10 @@ import requests
 # ======================= CONFIGURACAO =======================
 # Edite esta secao com o que interessa para a sua empresa.
 
-# Ate quantos dias a frente olhar (janela de propostas abertas)
-DIAS_A_FRENTE = 15
+# Ate quantos dias a frente olhar (janela de propostas abertas).
+# Pode deixar generoso aqui: o filtro fino de periodo agora e feito na
+# propria pagina (o visitante escolhe o intervalo que quiser).
+DIAS_A_FRENTE = 30
 
 # Esferas: F=Federal, E=Estadual, M=Municipal, D=Distrital
 ESFERAS_DESEJADAS = {"F", "E"}
@@ -33,12 +35,14 @@ ESFERAS_DESEJADAS = {"F", "E"}
 # UFs de interesse. Vazio [] = Brasil todo (sem filtro de UF).
 UFS_DESEJADAS = ["RJ"]
 
-# Modalidades a consultar (a API exige uma consulta por modalidade):
-# 1 Leilao-Eletr | 2 Dialogo Competitivo | 3 Concurso | 4 Concorrencia-Eletr
-# 5 Concorrencia-Presencial | 6 Pregao-Eletronico | 7 Pregao-Presencial
-# 8 Dispensa de Licitacao | 9 Inexigibilidade | 10 Manifest. Interesse
-# 11 Pre-qualificacao | 12 Credenciamento | 13 Leilao-Presencial
-MODALIDADES = [6, 8, 4]
+# Modalidades a consultar (a API exige uma consulta por modalidade).
+# Deixei aqui as modalidades mais relevantes para fornecimento de materiais/
+# servicos a orgaos publicos. A escolha de QUAL modalidade ver fica na
+# propria pagina (checkboxes) -- isto aqui so controla o que e BUSCADO.
+# 4 Concorrencia-Eletr | 5 Concorrencia-Presencial | 6 Pregao-Eletronico
+# 7 Pregao-Presencial | 8 Dispensa de Licitacao | 9 Inexigibilidade
+# 12 Credenciamento
+MODALIDADES = [4, 5, 6, 7, 8, 9, 12]
 
 # Palavras-chave que devem aparecer no objeto da compra (case-insensitive).
 # Vazio [] = traz tudo que bater esfera/UF/modalidade (pode vir muita coisa).
@@ -199,24 +203,36 @@ def fmt_data(v):
 
 
 def gerar_html(linhas, caminho="docs/index.html"):
+    import json
+
     agora = datetime.now(TZ_BR).strftime("%d/%m/%Y às %H:%M")
-
-    linhas_html = []
-    for r in linhas:
-        esfera_nome = {"F": "Federal", "E": "Estadual", "M": "Municipal", "D": "Distrital"}.get(r["esfera"], r["esfera"] or "-")
-        link = f'<a href="{html.escape(r["link"])}" target="_blank" rel="noopener">Participar ↗</a>' if r["link"] else "-"
-        linhas_html.append(f"""
-        <tr>
-          <td>{fmt_data(r['encerramento'])}</td>
-          <td><span class="badge">{html.escape(r['modalidade'] or '-')}</span> <span class="badge esfera">{esfera_nome}</span></td>
-          <td>{html.escape(r['orgao'] or '-')}<br><small>{html.escape(r['municipio'] or '')}/{html.escape(r['uf'] or '')}</small></td>
-          <td>{html.escape(r['objeto'][:220])}{'…' if len(r['objeto']) > 220 else ''}</td>
-          <td>{fmt_valor(r['valor'])}</td>
-          <td>{link}</td>
-        </tr>""")
-
     total = len(linhas)
     resumo_ufs = ", ".join(UFS_DESEJADAS) if UFS_DESEJADAS else "Brasil (todas as UFs)"
+
+    # Prepara os dados para o navegador: datas/valores ja formatados, mas
+    # tambem a data crua (AAAA-MM-DD) para o filtro de periodo funcionar.
+    registros_js = []
+    for r in linhas:
+        esfera_nome = {"F": "Federal", "E": "Estadual", "M": "Municipal", "D": "Distrital"}.get(
+            r["esfera"], r["esfera"] or "-"
+        )
+        enc = r["encerramento"] or ""
+        registros_js.append({
+            "modalidade": r["modalidade"] or "-",
+            "esfera": esfera_nome,
+            "orgao": r["orgao"] or "-",
+            "municipio": r["municipio"] or "",
+            "uf": r["uf"] or "",
+            "objeto": r["objeto"] or "",
+            "valor_fmt": fmt_valor(r["valor"]),
+            "encerramento_data": enc[:10] if enc else "",  # AAAA-MM-DD, para o filtro
+            "encerramento_fmt": fmt_data(enc),
+            "link": r["link"] or "",
+        })
+
+    modalidades_presentes = sorted({r["modalidade"] for r in registros_js})
+    dados_json = json.dumps(registros_js, ensure_ascii=False)
+    modalidades_json = json.dumps(modalidades_presentes, ensure_ascii=False)
 
     page = f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -238,7 +254,23 @@ def gerar_html(linhas, caminho="docs/index.html"):
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }}
   h1 {{ font-size: 1.4rem; margin-bottom: 0.2rem; }}
-  .meta {{ color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }}
+  .meta {{ color: var(--muted); font-size: 0.9rem; margin-bottom: 1.2rem; }}
+  .filtros {{
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.2rem; margin-bottom: 1.2rem; display: flex; flex-wrap: wrap; gap: 1.4rem;
+  }}
+  .filtros fieldset {{ border: none; padding: 0; margin: 0; min-width: 180px; }}
+  .filtros legend {{ font-weight: 600; font-size: 0.85rem; margin-bottom: 0.4rem; padding: 0; }}
+  .filtros label {{ display: block; font-size: 0.85rem; margin: 0.15rem 0; cursor: pointer; }}
+  .filtros input[type="date"] {{
+    padding: 0.35rem 0.5rem; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 0.85rem;
+  }}
+  .filtros .campo-data {{ display: flex; flex-direction: column; gap: 0.4rem; }}
+  .filtros button {{
+    align-self: flex-end; padding: 0.4rem 0.9rem; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); cursor: pointer; font-size: 0.85rem; height: fit-content;
+  }}
   .card {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }}
   table {{ width: 100%; border-collapse: collapse; font-size: 0.88rem; }}
   th, td {{ padding: 0.7rem 0.8rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }}
@@ -250,17 +282,112 @@ def gerar_html(linhas, caminho="docs/index.html"):
   a {{ color: var(--accent); text-decoration: none; font-weight: 600; }}
   .empty {{ padding: 2rem; text-align: center; color: var(--muted); }}
   .wrap {{ overflow-x: auto; }}
+  #contador {{ font-weight: 600; }}
 </style>
 </head>
 <body>
   <h1>📋 Achador de Licitações e Dispensas</h1>
   <div class="meta">
-    Atualizado em {agora} (horário de Brasília) · {total} oportunidade(s) abertas nos próximos {DIAS_A_FRENTE} dias ·
+    Atualizado em {agora} (horário de Brasília) · {total} oportunidade(s) coletadas ·
     Esfera(s): {', '.join(sorted(ESFERAS_DESEJADAS))} · UF(s): {resumo_ufs}
   </div>
-  <div class="card wrap">
-    {"<table><thead><tr><th>Encerra em</th><th>Modalidade</th><th>Órgão</th><th>Objeto</th><th>Valor estimado</th><th>Link</th></tr></thead><tbody>" + "".join(linhas_html) + "</tbody></table>" if linhas else '<div class="empty">Nenhuma oportunidade encontrada com os filtros atuais.</div>'}
+
+  <div class="filtros">
+    <fieldset>
+      <legend>Modalidade</legend>
+      <div id="filtroModalidade"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Encerramento da proposta</legend>
+      <div class="campo-data">
+        <label>De: <input type="date" id="dataDe"></label>
+        <label>Até: <input type="date" id="dataAte"></label>
+      </div>
+    </fieldset>
+    <button id="limparFiltros">Limpar filtros</button>
   </div>
+
+  <div class="meta">Mostrando <span id="contador">{total}</span> de {total} oportunidade(s)</div>
+
+  <div class="card wrap">
+    <table>
+      <thead>
+        <tr><th>Encerra em</th><th>Modalidade</th><th>Órgão</th><th>Objeto</th><th>Valor estimado</th><th>Link</th></tr>
+      </thead>
+      <tbody id="corpoTabela"></tbody>
+    </table>
+    <div id="vazio" class="empty" style="display:none">Nenhuma oportunidade com os filtros escolhidos.</div>
+  </div>
+
+<script>
+  const DADOS = {dados_json};
+  const MODALIDADES = {modalidades_json};
+
+  function escapeHtml(s) {{
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }}
+
+  // Monta os checkboxes de modalidade dinamicamente
+  const filtroModalidadeEl = document.getElementById('filtroModalidade');
+  MODALIDADES.forEach((m, i) => {{
+    const id = 'mod_' + i;
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" class="chk-modalidade" value="${{escapeHtml(m)}}" id="${{id}}" checked> ${{escapeHtml(m)}}`;
+    filtroModalidadeEl.appendChild(label);
+  }});
+
+  const corpoTabela = document.getElementById('corpoTabela');
+  const contador = document.getElementById('contador');
+  const vazioEl = document.getElementById('vazio');
+  const dataDeEl = document.getElementById('dataDe');
+  const dataAteEl = document.getElementById('dataAte');
+
+  function modalidadesSelecionadas() {{
+    return Array.from(document.querySelectorAll('.chk-modalidade:checked')).map(c => c.value);
+  }}
+
+  function render() {{
+    const mods = new Set(modalidadesSelecionadas());
+    const de = dataDeEl.value;   // "AAAA-MM-DD" ou ""
+    const ate = dataAteEl.value;
+
+    const filtrados = DADOS.filter(r => {{
+      if (!mods.has(r.modalidade)) return false;
+      if (de && r.encerramento_data && r.encerramento_data < de) return false;
+      if (ate && r.encerramento_data && r.encerramento_data > ate) return false;
+      return true;
+    }});
+
+    corpoTabela.innerHTML = filtrados.map(r => `
+      <tr>
+        <td>${{escapeHtml(r.encerramento_fmt)}}</td>
+        <td><span class="badge">${{escapeHtml(r.modalidade)}}</span> <span class="badge esfera">${{escapeHtml(r.esfera)}}</span></td>
+        <td>${{escapeHtml(r.orgao)}}<br><small>${{escapeHtml(r.municipio)}}/${{escapeHtml(r.uf)}}</small></td>
+        <td>${{escapeHtml(r.objeto.slice(0, 220))}}${{r.objeto.length > 220 ? '…' : ''}}</td>
+        <td>${{escapeHtml(r.valor_fmt)}}</td>
+        <td>${{r.link ? `<a href="${{escapeHtml(r.link)}}" target="_blank" rel="noopener">Participar ↗</a>` : '-'}}</td>
+      </tr>
+    `).join('');
+
+    contador.textContent = filtrados.length;
+    vazioEl.style.display = filtrados.length === 0 ? 'block' : 'none';
+    document.querySelector('table').style.display = filtrados.length === 0 ? 'none' : 'table';
+  }}
+
+  document.querySelectorAll('.chk-modalidade').forEach(c => c.addEventListener('change', render));
+  dataDeEl.addEventListener('change', render);
+  dataAteEl.addEventListener('change', render);
+  document.getElementById('limparFiltros').addEventListener('click', () => {{
+    document.querySelectorAll('.chk-modalidade').forEach(c => c.checked = true);
+    dataDeEl.value = '';
+    dataAteEl.value = '';
+    render();
+  }});
+
+  render();
+</script>
 </body>
 </html>"""
 
