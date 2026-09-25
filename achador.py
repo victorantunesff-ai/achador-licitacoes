@@ -76,7 +76,20 @@ def consultar_modalidade(codigo_modalidade, data_final, uf=None):
         if uf:
             params["uf"] = uf
 
-        resp = requests.get(f"{BASE_URL}/contratacoes/proposta", params=params, timeout=30)
+        resp = None
+        for tentativa in range(6):
+            resp = requests.get(
+                f"{BASE_URL}/contratacoes/proposta",
+                params=params,
+                timeout=30,
+                headers={"User-Agent": "achador-licitacoes/1.0 (uso pessoal, PNCP publico)"},
+            )
+            if resp.status_code == 429:
+                espera = 8 * (tentativa + 1)
+                print(f"  (PNCP pediu para ir mais devagar — esperando {espera}s e tentando de novo...)")
+                time.sleep(espera)
+                continue
+            break
 
         if resp.status_code == 204:
             break
@@ -93,7 +106,7 @@ def consultar_modalidade(codigo_modalidade, data_final, uf=None):
         if pagina >= total_paginas:
             break
         pagina += 1
-        time.sleep(0.3)
+        time.sleep(1.5)
 
     return registros
 
