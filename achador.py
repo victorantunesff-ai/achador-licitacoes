@@ -77,19 +77,30 @@ def consultar_modalidade(codigo_modalidade, data_final, uf=None):
             params["uf"] = uf
 
         resp = None
+        ultima_excecao = None
         for tentativa in range(6):
-            resp = requests.get(
-                f"{BASE_URL}/contratacoes/proposta",
-                params=params,
-                timeout=30,
-                headers={"User-Agent": "achador-licitacoes/1.0 (uso pessoal, PNCP publico)"},
-            )
+            try:
+                resp = requests.get(
+                    f"{BASE_URL}/contratacoes/proposta",
+                    params=params,
+                    timeout=60,
+                    headers={"User-Agent": "achador-licitacoes/1.0 (uso pessoal, PNCP publico)"},
+                )
+            except requests.exceptions.RequestException as erro:
+                ultima_excecao = erro
+                espera = 10 * (tentativa + 1)
+                print(f"  (erro de rede ({erro.__class__.__name__}) — esperando {espera}s e tentando de novo...)")
+                time.sleep(espera)
+                continue
+
             if resp.status_code == 429:
                 espera = 8 * (tentativa + 1)
                 print(f"  (PNCP pediu para ir mais devagar — esperando {espera}s e tentando de novo...)")
                 time.sleep(espera)
                 continue
             break
+        else:
+            raise ultima_excecao or RuntimeError("Falha ao consultar a API do PNCP após várias tentativas.")
 
         if resp.status_code == 204:
             break
