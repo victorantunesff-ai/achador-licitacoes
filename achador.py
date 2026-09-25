@@ -78,7 +78,7 @@ def consultar_modalidade(codigo_modalidade, data_final, uf=None):
 
         resp = None
         ultima_excecao = None
-        for tentativa in range(6):
+        for tentativa in range(8):
             try:
                 resp = requests.get(
                     f"{BASE_URL}/contratacoes/proposta",
@@ -93,9 +93,9 @@ def consultar_modalidade(codigo_modalidade, data_final, uf=None):
                 time.sleep(espera)
                 continue
 
-            if resp.status_code == 429:
+            if resp.status_code == 429 or 500 <= resp.status_code < 600:
                 espera = 8 * (tentativa + 1)
-                print(f"  (PNCP pediu para ir mais devagar — esperando {espera}s e tentando de novo...)")
+                print(f"  (PNCP respondeu com erro {resp.status_code} — esperando {espera}s e tentando de novo...)")
                 time.sleep(espera)
                 continue
             break
